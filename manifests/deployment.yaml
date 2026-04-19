@@ -1,0 +1,49 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qb-service-pii
+  namespace: qb-service-pii
+  labels:
+    app: qb-service-pii
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qb-service-pii
+  template:
+    metadata:
+      labels:
+        app: qb-service-pii
+    spec:
+      serviceAccountName: qb-service-pii-sa
+      containers:
+        - name: backend
+          image: ghcr.io/quaterbit/qb.app.backend:latest
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3

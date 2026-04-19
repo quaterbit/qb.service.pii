@@ -1,0 +1,17 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qb-service-pii
+  namespace: qb-service-pii
+  labels:
+    app: qb-service-pii
+spec:
+  selector:
+    app: qb-service-pii
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP
