@@ -20,6 +20,7 @@ spec:
       containers:
         - name: backend
           image: ghcr.io/quaterbit/qb.service.pii:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
               name: http
