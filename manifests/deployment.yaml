@@ -19,8 +19,7 @@ spec:
       serviceAccountName: qb-service-pii-sa
       containers:
         - name: backend
-          image: ghcr.io/quaterbit/qb.service.pii:latest
-          imagePullPolicy: Always
+          image: ghcr.io/quaterbit/qb.service.pii:fd6f801
           ports:
             - containerPort: 8000
               name: http
