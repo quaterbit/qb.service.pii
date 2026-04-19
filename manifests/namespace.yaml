@@ -1,7 +1,0 @@
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: qb-service-pii
-  labels:
-    name: qb-service-pii

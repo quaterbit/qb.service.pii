@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: qb-service-pii
-  namespace: qb-service-pii
+  namespace: qb
   labels:
     app: qb-service-pii
 spec:
