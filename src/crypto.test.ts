@@ -63,3 +63,42 @@ it("PIICryptoLive uses a configured redacted master key for encrypt, decrypt, an
     expect(result.rotatedPlaintext).toBe("{\"name\":\"Ada\"}")
   })
 })
+
+it("PIICryptoLive trims configured master keys before deriving the encryption key", async () => {
+  const storageKey = "aggregate:00000000-0000-4000-8000-000000000002:1"
+
+  await withEnv({
+    DEPLOYMENT_ENVIRONMENT: "production",
+    PII_MASTER_KEY: "production-test-master-key"
+  }, async () => {
+    const encrypted = await Effect.runPromise(
+      Effect.gen(function* () {
+        const crypto = yield* PIICrypto
+        return yield* crypto.encrypt({
+          storageKey,
+          plaintextJson: "{\"name\":\"Grace\"}",
+          encryptedAt: DateTime.unsafeMake("2026-01-01T00:00:00.000Z")
+        })
+      }).pipe(Effect.provide(PIICryptoLive))
+    )
+
+    await withEnv({
+      DEPLOYMENT_ENVIRONMENT: "production",
+      PII_MASTER_KEY: " production-test-master-key\n"
+    }, async () => {
+      const decrypted = await Effect.runPromise(
+        Effect.gen(function* () {
+          const crypto = yield* PIICrypto
+          return yield* crypto.decrypt({
+            storageKey,
+            encryptedData: encrypted.encryptedData,
+            encryptedDek: encrypted.encryptedDek,
+            encryption: encrypted.encryption
+          })
+        }).pipe(Effect.provide(PIICryptoLive))
+      )
+
+      expect(decrypted).toBe("{\"name\":\"Grace\"}")
+    })
+  })
+})

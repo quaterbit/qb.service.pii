@@ -1,8 +1,10 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto"
+import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as DateTime from "effect/DateTime"
+import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import {
   EncryptedPayload,
@@ -30,21 +32,43 @@ const LOCAL_MASTER_SECRET = Redacted.make("n2-local-pii-master-key")
 
 type MasterSecret = Redacted.Redacted<string>
 
-const isLocalEnvironment = () => {
-  const deployment = process.env.DEPLOYMENT_ENVIRONMENT?.trim().toLowerCase()
-  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase()
-  if (deployment !== undefined) {
-    return deployment === "local" || deployment === "development" || deployment === "test"
+const optionText = (value: Option.Option<string>) =>
+  Option.match(value, {
+    onNone: () => undefined,
+    onSome: (text) => text.trim().toLowerCase()
+  })
+
+const isLocalEnvironment = (
+  deployment: Option.Option<string>,
+  nodeEnv: Option.Option<string>,
+  vitest: Option.Option<string>
+) => {
+  const configuredDeployment = optionText(deployment)
+  if (configuredDeployment !== undefined) {
+    return configuredDeployment === "local" ||
+      configuredDeployment === "development" ||
+      configuredDeployment === "test"
   }
-  return nodeEnv === "development" || nodeEnv === "test" || process.env.VITEST !== undefined
+  const configuredNodeEnv = optionText(nodeEnv)
+  return configuredNodeEnv === "development" ||
+    configuredNodeEnv === "test" ||
+    Option.isSome(vitest)
 }
 
-const masterSecret = () => {
-  const configured = process.env.PII_MASTER_KEY?.trim()
-  if (configured !== undefined && configured.length > 0) return Redacted.make(configured)
-  if (isLocalEnvironment()) return LOCAL_MASTER_SECRET
-  throw new Error("PII_MASTER_KEY is required outside local/test environments")
-}
+const readMasterSecret = Effect.gen(function* () {
+  const configured = yield* Config.option(Config.redacted("PII_MASTER_KEY"))
+  if (Option.isSome(configured)) {
+    const trimmed = Redacted.value(configured.value).trim()
+    if (trimmed.length > 0) return Redacted.make(trimmed)
+  }
+
+  const deployment = yield* Config.option(Config.string("DEPLOYMENT_ENVIRONMENT"))
+  const nodeEnv = yield* Config.option(Config.string("NODE_ENV"))
+  const vitest = yield* Config.option(Config.string("VITEST"))
+
+  if (isLocalEnvironment(deployment, nodeEnv, vitest)) return LOCAL_MASTER_SECRET
+  return yield* Effect.fail(new Error("PII_MASTER_KEY is required outside local/test environments"))
+})
 
 const masterKey = (secret: MasterSecret) => createHash("sha256").update(Redacted.value(secret)).digest()
 
@@ -125,8 +149,8 @@ export class PIICrypto extends Context.Tag("PIICrypto")<
 
 export const PIICryptoLive = Layer.effect(
   PIICrypto,
-  Effect.sync(() => {
-    const secret = masterSecret()
+  Effect.gen(function* () {
+    const secret = yield* readMasterSecret
     return {
       encrypt: (input) =>
         Effect.try({

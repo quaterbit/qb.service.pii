@@ -1,4 +1,5 @@
 import { it, expect } from "@effect/vitest"
+import * as Either from "effect/Either"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { WorkflowEngine } from "@effect/workflow"
@@ -98,6 +99,228 @@ it.scoped("live publisher runs erasure side effects from the durable message pay
       expect(forgotten).toEqual([storageKey])
     }).pipe(Effect.provide(testLayer))
   })
+
+it.scoped("live publisher ignores malformed deleted payload URIs", () => {
+  const recordId = makeRecordId(8)
+  const actorId = makeRecordId(9)
+  const profileId = makeRecordId(10)
+  const storageKey = `aggregate:${profileId}:1`
+  const deleted: Array<string> = []
+  const forgotten: Array<string> = []
+  const message = makePIIProviderEventMessage({
+    recordId,
+    revision: 6,
+    eventType: "PIIErasureCompleted",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload: {
+      _tag: "PIIErasureCompleted",
+      storageKey,
+      recordId,
+      actorId,
+      deletedPayloadUri: `not-an-object-uri`
+    }
+  })
+
+  const testLayer = Layer.provide(
+    PIIProviderEventPublisherLive,
+    Layer.merge(
+      Layer.succeed(ObjectStorage, {
+        ensureBucket: () => Effect.void,
+        putObject: (input) =>
+          Effect.succeed({
+            bucket: input.bucket,
+            key: input.key,
+            uri: `s3://${input.bucket}/${input.key}`
+          }),
+        getObject: () => Effect.fail(new ObjectStorageError({ message: "not used" })),
+        deleteObject: (input) =>
+          Effect.sync(() => {
+            deleted.push(`${input.bucket}/${input.key}`)
+          })
+      }),
+      Layer.succeed(ProfilePiiReferenceNotifier, {
+        forgetPiiReference: (event) =>
+          Effect.sync(() => {
+            forgotten.push(event.storageKey)
+          })
+      })
+    )
+  )
+
+  return Effect.gen(function* () {
+    const publisher = yield* PIIProviderEventPublisher
+    yield* publisher.publish(message)
+
+    expect(deleted).toEqual([])
+    expect(forgotten).toEqual([storageKey])
+  }).pipe(Effect.provide(testLayer))
+})
+
+it.scoped("live publisher fails transient encrypted payload delete failures before notifying profile", () => {
+  const recordId = makeRecordId(11)
+  const actorId = makeRecordId(12)
+  const profileId = makeRecordId(13)
+  const storageKey = `aggregate:${profileId}:1`
+  const forgotten: Array<string> = []
+  const message = makePIIProviderEventMessage({
+    recordId,
+    revision: 7,
+    eventType: "PIIErasureCompleted",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload: {
+      _tag: "PIIErasureCompleted",
+      storageKey,
+      recordId,
+      actorId,
+      deletedPayloadUri: `s3://n2-pii-payloads/${storageKey}/payload.enc`
+    }
+  })
+
+  const testLayer = Layer.provide(
+    PIIProviderEventPublisherLive,
+    Layer.merge(
+      Layer.succeed(ObjectStorage, {
+        ensureBucket: () => Effect.void,
+        putObject: (input) =>
+          Effect.succeed({
+            bucket: input.bucket,
+            key: input.key,
+            uri: `s3://${input.bucket}/${input.key}`
+          }),
+        getObject: () => Effect.fail(new ObjectStorageError({ message: "not used" })),
+        deleteObject: () => Effect.fail(new ObjectStorageError({ message: "delete failed" }))
+      }),
+      Layer.succeed(ProfilePiiReferenceNotifier, {
+        forgetPiiReference: (event) =>
+          Effect.sync(() => {
+            forgotten.push(event.storageKey)
+          })
+      })
+    )
+  )
+
+  return Effect.gen(function* () {
+    const publisher = yield* PIIProviderEventPublisher
+    const result = yield* Effect.either(publisher.publish(message))
+
+    expect(Either.isLeft(result)).toBe(true)
+    expect(forgotten).toEqual([])
+  }).pipe(Effect.provide(testLayer))
+})
+
+it.scoped("live publisher treats missing encrypted payload deletes as idempotent", () => {
+  const recordId = makeRecordId(17)
+  const actorId = makeRecordId(18)
+  const profileId = makeRecordId(19)
+  const storageKey = `aggregate:${profileId}:1`
+  const forgotten: Array<string> = []
+  const message = makePIIProviderEventMessage({
+    recordId,
+    revision: 9,
+    eventType: "PIIErasureCompleted",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload: {
+      _tag: "PIIErasureCompleted",
+      storageKey,
+      recordId,
+      actorId,
+      deletedPayloadUri: `s3://n2-pii-payloads/${storageKey}/payload.enc`
+    }
+  })
+
+  const testLayer = Layer.provide(
+    PIIProviderEventPublisherLive,
+    Layer.merge(
+      Layer.succeed(ObjectStorage, {
+        ensureBucket: () => Effect.void,
+        putObject: (input) =>
+          Effect.succeed({
+            bucket: input.bucket,
+            key: input.key,
+            uri: `s3://${input.bucket}/${input.key}`
+          }),
+        getObject: () => Effect.fail(new ObjectStorageError({ message: "not used" })),
+        deleteObject: () => Effect.fail(new ObjectStorageError({
+          message: `Failed to delete object "n2-pii-payloads/${storageKey}/payload.enc": Object not found`
+        }))
+      }),
+      Layer.succeed(ProfilePiiReferenceNotifier, {
+        forgetPiiReference: (event) =>
+          Effect.sync(() => {
+            forgotten.push(event.storageKey)
+          })
+      })
+    )
+  )
+
+  return Effect.gen(function* () {
+    const publisher = yield* PIIProviderEventPublisher
+    yield* publisher.publish(message)
+
+    expect(forgotten).toEqual([storageKey])
+  }).pipe(Effect.provide(testLayer))
+})
+
+it.scopedLive("publish workflow retries when the live erasure notifier fails", () =>
+  Effect.gen(function* () {
+    const recordId = makeRecordId(14)
+    const actorId = makeRecordId(15)
+    const profileId = makeRecordId(16)
+    const storageKey = `aggregate:${profileId}:1`
+    let attempts = 0
+    const forgotten: Array<string> = []
+    const message = makePIIProviderEventMessage({
+      recordId,
+      revision: 8,
+      eventType: "PIIErasureCompleted",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      payload: {
+        _tag: "PIIErasureCompleted",
+        storageKey,
+        recordId,
+        actorId,
+        deletedPayloadUri: ``
+      }
+    })
+
+    const publisherLive = Layer.provide(
+      PIIProviderEventPublisherLive,
+      Layer.merge(
+        Layer.succeed(ObjectStorage, {
+          ensureBucket: () => Effect.void,
+          putObject: (input) =>
+            Effect.succeed({
+              bucket: input.bucket,
+              key: input.key,
+              uri: `s3://${input.bucket}/${input.key}`
+            }),
+          getObject: () => Effect.fail(new ObjectStorageError({ message: "not used" })),
+          deleteObject: () => Effect.void
+        }),
+        Layer.succeed(ProfilePiiReferenceNotifier, {
+          forgetPiiReference: (event) =>
+            Effect.sync(() => {
+              attempts += 1
+              if (attempts === 1) {
+                throw new Error("notifier failed")
+              }
+              forgotten.push(event.storageKey)
+            })
+        })
+      )
+    )
+    const testLayer = Layer.mergeAll(
+      Layer.provideMerge(PIIProviderEventPublishHandlers, WorkflowEngine.layerMemory),
+      publisherLive
+    )
+
+    yield* PIIEventPublishWorkflow.execute(message).pipe(
+      Effect.provide(testLayer)
+    )
+
+    expect(attempts).toBe(2)
+    expect(forgotten).toEqual([storageKey])
+  }))
 
 it.scopedLive("publish workflow is idempotent for the same event id", () =>
   Effect.gen(function* () {

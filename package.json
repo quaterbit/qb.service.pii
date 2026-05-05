@@ -2,6 +2,10 @@
   "name": "qb.service.pii",
   "type": "module",
   "private": true,
+  "exports": {
+    "./contracts": "./src/contracts/commands.ts",
+    "./contracts.js": "./src/contracts/commands.ts"
+  },
   "scripts": {
     "test": "cd ../.. && bunx vitest run services/pii-provider/src",
     "typecheck": "bunx tsc --noEmit",
@@ -13,6 +17,7 @@
   "dependencies": {
     "@semyenov/n2": "^0.1.1",
     "@semyenov/n2-service-shared": "workspace:*",
+    "qb.service.profiler": "workspace:*",
     "effect": "^3.21.0",
     "@effect/cluster": "^0.58.0",
     "@effect/experimental": "^0.60.0",

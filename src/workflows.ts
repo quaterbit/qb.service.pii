@@ -8,7 +8,7 @@ import {
   makeEventMessageFields,
   makePublishWorkflow
 } from "@semyenov/n2/helpers"
-import { ObjectStorage, parseObjectUri } from "@semyenov/n2-service-shared/object-storage"
+import { ObjectStorage, parseObjectUri, type ObjectStorageError } from "@semyenov/n2-service-shared/object-storage"
 import { ProfilePiiReferenceNotifier, type PIIErasureCompletedNotification } from "./profile-notifier.js"
 
 const TOPIC = "pii-provider.events"
@@ -27,6 +27,14 @@ const erasureCompletedPayload = (payload: unknown): PIIErasureCompletedPayload |
     typeof event.actorId === "string"
     ? event as PIIErasureCompletedPayload
     : undefined
+}
+
+const isIdempotentMissingObjectDelete = (error: ObjectStorageError) => {
+  const message = error.message.toLowerCase()
+  return message.includes("not found") ||
+    message.includes("nosuchkey") ||
+    message.includes("no such key") ||
+    message.includes("specified key does not exist")
 }
 
 export class PIIProviderEventMessage extends Schema.Class<PIIProviderEventMessage>("PIIProviderEventMessage")({
@@ -71,7 +79,11 @@ export const PIIProviderEventPublisherLive = Layer.effect(
       if (reference === undefined) return Effect.void
       return storage.deleteObject(reference).pipe(
         Effect.catchAll((error) =>
-          Effect.logWarning(`[pii-provider] encrypted payload delete failed: ${String(error)}`)
+          isIdempotentMissingObjectDelete(error)
+            ? Effect.void
+            : Effect.logWarning(`[pii-provider] encrypted payload delete failed: ${String(error)}`).pipe(
+                Effect.zipRight(Effect.fail(error))
+              )
         )
       )
     }
@@ -89,10 +101,9 @@ export const PIIProviderEventPublisherLive = Layer.effect(
           Effect.zipRight(
             erasure === undefined
               ? Effect.void
-              : Effect.all([
-                  deletePayloadObject(erasure.deletedPayloadUri),
-                  notifier.forgetPiiReference(erasure)
-                ], { discard: true })
+              : deletePayloadObject(erasure.deletedPayloadUri).pipe(
+                  Effect.zipRight(notifier.forgetPiiReference(erasure))
+                )
           )
         )
       }
