@@ -1,0 +1,31 @@
+{
+  "name": "qb.service.pii",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "cd ../.. && bunx vitest run services/pii-provider/src",
+    "typecheck": "bunx tsc --noEmit",
+    "start": "bun src/server.ts",
+    "start:cluster": "bun src/cluster.ts",
+    "migrate": "bun src/migrate.ts",
+    "replay": "bun src/replay.ts"
+  },
+  "dependencies": {
+    "@semyenov/n2": "^0.1.1",
+    "@semyenov/n2-service-shared": "workspace:*",
+    "effect": "^3.21.0",
+    "@effect/cluster": "^0.58.0",
+    "@effect/experimental": "^0.60.0",
+    "@effect/platform": "^0.96.0",
+    "@effect/platform-bun": "^0.89.0",
+    "@effect/rpc": "^0.75.0",
+    "@effect/sql": "^0.51.0",
+    "@effect/sql-pg": "^0.52.1",
+    "@effect/sql-clickhouse": "^0.48.0",
+    "@effect/workflow": "^0.18.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}

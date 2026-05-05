@@ -19,11 +19,39 @@ spec:
       serviceAccountName: qb-service-pii-sa
       containers:
         - name: backend
-          image: ghcr.io/quaterbit/qb.service.pii:fd6f801
+          image: ghcr.io/quaterbit/qb.service.pii:a5553f3
           ports:
-            - containerPort: 8000
+            - containerPort: 4120
               name: http
               protocol: TCP
+          env:
+            - name: PORT
+              value: "4120"
+            - name: PII_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: qb-service-pii-secrets
+                  key: PII_MASTER_KEY
+            - name: OBJECT_STORAGE_ENDPOINT
+              value: "minio.qb.svc.cluster.local"
+            - name: OBJECT_STORAGE_PORT
+              value: "9000"
+            - name: OBJECT_STORAGE_USE_SSL
+              value: "false"
+            - name: PII_PAYLOADS_BUCKET
+              value: "n2-pii-payloads"
+            - name: PROFILE_PROVIDER_BASE_URL
+              value: "http://qb-service-profiler.qb.svc.cluster.local"
+            - name: OBJECT_STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: qb-object-storage-secrets
+                  key: OBJECT_STORAGE_ACCESS_KEY
+            - name: OBJECT_STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: qb-object-storage-secrets
+                  key: OBJECT_STORAGE_SECRET_KEY
           resources:
             requests:
               memory: "128Mi"
@@ -33,16 +61,16 @@ spec:
               cpu: "200m"
           livenessProbe:
             httpGet:
-              path: /healthz
-              port: 8000
+              path: /health
+              port: 4120
             initialDelaySeconds: 10
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /healthz
-              port: 8000
+              path: /health
+              port: 4120
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
